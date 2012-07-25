@@ -17,8 +17,12 @@
 
 package com.digitalpebble.behemoth;
 
+import java.io.File;
 import java.io.IOException;
-
+import java.net.URI;
+import java.net.URL;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
@@ -26,6 +30,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.filecache.DistributedCache;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
@@ -53,9 +58,11 @@ import com.digitalpebble.classification.util.Tokenizer;
  **/
 public class ClassifierJob extends Configured implements Tool {
 
+    public static final String modelNameParam = "textclassif.model.name";
+
     public static void main(String[] args) throws Exception {
         int res = ToolRunner.run(BehemothConfiguration.create(),
-                new CorpusFilter(), args);
+                new ClassifierJob(), args);
         System.exit(res);
     }
 
@@ -95,7 +102,7 @@ public class ClassifierJob extends Configured implements Tool {
 
         Path inputPath = new Path(line.getOptionValue("i"));
         Path outputPath = new Path(line.getOptionValue("o"));
-        Path modelPath = new Path(line.getOptionValue("m"));
+        String modelPath = line.getOptionValue("m");
 
         // TODO pass the reference of the model to the mapper
 
@@ -118,6 +125,10 @@ public class ClassifierJob extends Configured implements Tool {
         FileInputFormat.addInputPath(job, inputPath);
         FileOutputFormat.setOutputPath(job, outputPath);
 
+        job.set(modelNameParam, modelPath);
+        // push the UIMA pear onto the DistributedCache
+        DistributedCache.addCacheFile(new URI(modelPath), job);
+
         try {
             JobClient.runJob(job);
         } catch (Exception e) {
@@ -138,6 +149,9 @@ class TextClassifierMapper extends MapReduceBase implements
     TextClassifier classifier;
     boolean lowerCase = false;
     String docFeaturename = "label";
+
+    private static final Logger LOG = LoggerFactory
+            .getLogger(TextClassifierMapper.class);
 
     public void map(Text key, BehemothDocument doc,
             OutputCollector<Text, BehemothDocument> collector, Reporter reported)
@@ -173,7 +187,37 @@ class TextClassifierMapper extends MapReduceBase implements
         filter = DocumentFilter.getFilters(job);
         lowerCase = job.getBoolean("classification.tokenize", false);
         docFeaturename = job.get("classification.doc.feature.name", "label");
-        // TODO load the TC model from DFS
+
+        String modelPath = job.get(ClassifierJob.modelNameParam);
+
+        URL modelURL = null;
+
+        // the application will have been unzipped and put on the distributed
+        // cache
+        try {
+            Path[] localArchives = DistributedCache.getLocalCacheArchives(job);
+            if (localArchives==null){
+                // local mode? try and read direct from the path
+                modelURL = new URL("file://" +modelPath);
+            }
+            // identify the right archive
+            else for (Path la : localArchives) {
+                String localPath = la.toUri().toString();
+                LOG.info("LocalCache : " + localPath);
+                if (!localPath.endsWith(modelPath))
+                    continue;
+                modelURL = new URL("file://" + localPath);
+                break;
+            }
+            
+            classifier = classifier.getClassifier(modelURL.getPath());
+            
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Impossible to retrieve model from distributed cache", e);
+        }
+        
+
     }
 
 }
