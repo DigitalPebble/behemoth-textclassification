@@ -204,7 +204,13 @@ class TextClassifierMapper extends MapReduceBase implements
                         modelFile = new File(parent, modelCacheName.replaceAll(
                                 ".zip", ""));
                         LOG.info("Unzipped ? " + modelFile.getAbsolutePath());
-                        LOG.info("modelFile exists " + modelFile.exists());
+                        boolean doesExist = modelFile.exists();
+                        LOG.info("modelFile exists " + doesExist);
+                        // if it does not exist it must have been unpacked at
+                        // the parent level
+                        if (!doesExist) {
+                            modelFile = new File(parent);
+                        }
                         break;
                     }
                 }
