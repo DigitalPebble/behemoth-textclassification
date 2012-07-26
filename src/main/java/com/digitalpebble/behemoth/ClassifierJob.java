@@ -104,9 +104,11 @@ public class ClassifierJob extends Configured implements Tool {
         Path outputPath = new Path(line.getOptionValue("o"));
         String modelPath = line.getOptionValue("m");
 
-        // TODO pass the reference of the model to the mapper
-
         JobConf job = new JobConf(getConf());
+
+        // push the model file to the DistributedCache
+        DistributedCache.addCacheArchive(new URI(modelPath), job);
+
         job.setJarByClass(this.getClass());
 
         job.setJobName("ClassifierJob : " + inputPath.toString());
@@ -126,14 +128,11 @@ public class ClassifierJob extends Configured implements Tool {
         FileOutputFormat.setOutputPath(job, outputPath);
 
         job.set(modelNameParam, modelPath);
-        // push the UIMA pear onto the DistributedCache
-        DistributedCache.addCacheFile(new URI(modelPath), job);
 
         try {
             JobClient.runJob(job);
         } catch (Exception e) {
             e.printStackTrace();
-            fs.delete(outputPath, true);
         } finally {
         }
 
@@ -156,8 +155,9 @@ class TextClassifierMapper extends MapReduceBase implements
     public void map(Text key, BehemothDocument doc,
             OutputCollector<Text, BehemothDocument> collector, Reporter reported)
             throws IOException {
+
         // get the text
-        if (doc.getText() == null | doc.getText().length() < 2) {
+        if (doc.getText() == null || doc.getText().length() < 2) {
             reported.incrCounter("text classification", "MISSING TEXT", 1);
             collector.collect(key, doc);
             return;
@@ -190,33 +190,36 @@ class TextClassifierMapper extends MapReduceBase implements
 
         String modelPath = job.get(ClassifierJob.modelNameParam);
 
-        URL modelURL = null;
-
-        // the application will have been unzipped and put on the distributed
-        // cache
+        File modelFile = null;
         try {
-            Path[] localArchives = DistributedCache.getLocalCacheArchives(job);
-            if (localArchives==null){
-                // local mode? try and read direct from the path
-                modelURL = new URL("file://" +modelPath);
+            String modelCacheName = new Path(modelPath).getName();
+            Path[] cacheFiles = DistributedCache.getLocalCacheArchives(job);
+            if (null != cacheFiles && cacheFiles.length > 0) {
+                for (Path cachePath : cacheFiles) {
+                    LOG.info("LocalCache : " + cachePath.toUri());
+                    LOG.info("modelCacheName : " + modelCacheName);
+                    if (cachePath.toUri().toString().endsWith(modelCacheName)) {
+                        String parent = new File(cachePath.toUri().getPath())
+                                .toString();
+                        modelFile = new File(parent, modelCacheName.replaceAll(
+                                ".zip", ""));
+                        LOG.info("Unzipped ? " + modelFile.getAbsolutePath());
+                        LOG.info("modelFile exists " + modelFile.exists());
+                        break;
+                    }
+                }
             }
-            // identify the right archive
-            else for (Path la : localArchives) {
-                String localPath = la.toUri().toString();
-                LOG.info("LocalCache : " + localPath);
-                if (!localPath.endsWith(modelPath))
-                    continue;
-                modelURL = new URL("file://" + localPath);
-                break;
-            }
-            
-            classifier = classifier.getClassifier(modelURL.getPath());
-            
-        } catch (Exception e) {
+        } catch (IOException ioe) {
             throw new RuntimeException(
-                    "Impossible to retrieve model from distributed cache", e);
+                    "Impossible to retrieve model from distributed cache", ioe);
         }
-        
+
+        try {
+            classifier = classifier.getClassifier(modelFile);
+        } catch (Exception e) {
+            throw new RuntimeException("Impossible to load model from "
+                    + modelFile, e);
+        }
 
     }
 
