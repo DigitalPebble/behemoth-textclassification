@@ -177,7 +177,10 @@ class TextClassifierMapper extends MapReduceBase implements
         }
         String label = classifier.getBestLabel(scores);
         doc.getMetadata(true).put(new Text(docFeaturename), new Text(label));
-        collector.collect(key, doc);
+        if (filter.keep(doc)) {
+            collector.collect(key, doc);
+        } else
+            reported.incrCounter("text classification", "FILTERED", 1l);
         reported.incrCounter("text classification", label, 1);
     }
 
