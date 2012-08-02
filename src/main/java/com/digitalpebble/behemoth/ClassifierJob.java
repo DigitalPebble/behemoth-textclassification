@@ -145,9 +145,9 @@ class TextClassifierMapper extends MapReduceBase implements
         Mapper<Text, BehemothDocument, Text, BehemothDocument> {
 
     DocumentFilter filter;
-    TextClassifier classifier;
     boolean lowerCase = false;
     String docFeaturename = "label";
+    private static TextClassifier classifier;
 
     private static final Logger LOG = LoggerFactory
             .getLogger(TextClassifierMapper.class);
@@ -159,7 +159,7 @@ class TextClassifierMapper extends MapReduceBase implements
         // get the text
         if (doc.getText() == null || doc.getText().length() < 2) {
             reported.incrCounter("text classification", "MISSING TEXT", 1);
-            filterOrCollect(key, doc,collector,reported);
+            filterOrCollect(key, doc, collector, reported);
             return;
         }
         // use the quick and dirty tokenization
@@ -171,18 +171,19 @@ class TextClassifierMapper extends MapReduceBase implements
             scores = classifier.classify(tcdoc);
         } catch (Exception e) {
             LOG.error("Exception while classifying", e);
-            filterOrCollect(key, doc,collector,reported);
+            filterOrCollect(key, doc, collector, reported);
             reported.incrCounter("text classification", "EXCEPTION", 1);
             return;
         }
         String label = classifier.getBestLabel(scores);
         doc.getMetadata(true).put(new Text(docFeaturename), new Text(label));
-        filterOrCollect(key, doc,collector,reported);
+        filterOrCollect(key, doc, collector, reported);
         reported.incrCounter("text classification", label, 1);
     }
-    
+
     private void filterOrCollect(Text key, BehemothDocument doc,
-            OutputCollector<Text, BehemothDocument> collector, Reporter reported) throws IOException{
+            OutputCollector<Text, BehemothDocument> collector, Reporter reported)
+            throws IOException {
         if (filter.keep(doc)) {
             collector.collect(key, doc);
         } else
@@ -198,6 +199,15 @@ class TextClassifierMapper extends MapReduceBase implements
 
         String modelPath = job.get(ClassifierJob.modelNameParam);
 
+        // optimisation for jvm reuse
+        // do not reload the model
+        if (classifier != null) {
+            LOG.info("Reusing existing classifier [" + classifier.toString()
+                    + "]");
+            return;
+        }
+
+        long start = System.currentTimeMillis();
         File modelFile = null;
         try {
             String modelCacheName = new Path(modelPath).getName();
@@ -234,7 +244,8 @@ class TextClassifierMapper extends MapReduceBase implements
             throw new RuntimeException("Impossible to load model from "
                     + modelFile, e);
         }
-
+        long end = System.currentTimeMillis();
+        LOG.info("Model loaded in " + (end-start)+" msec");
     }
 
 }
