@@ -159,7 +159,7 @@ class TextClassifierMapper extends MapReduceBase implements
         // get the text
         if (doc.getText() == null || doc.getText().length() < 2) {
             reported.incrCounter("text classification", "MISSING TEXT", 1);
-            collector.collect(key, doc);
+            filterOrCollect(key, doc,collector,reported);
             return;
         }
         // use the quick and dirty tokenization
@@ -170,18 +170,23 @@ class TextClassifierMapper extends MapReduceBase implements
         try {
             scores = classifier.classify(tcdoc);
         } catch (Exception e) {
-            e.printStackTrace();
-            collector.collect(key, doc);
+            LOG.error("Exception while classifying", e);
+            filterOrCollect(key, doc,collector,reported);
             reported.incrCounter("text classification", "EXCEPTION", 1);
             return;
         }
         String label = classifier.getBestLabel(scores);
         doc.getMetadata(true).put(new Text(docFeaturename), new Text(label));
+        filterOrCollect(key, doc,collector,reported);
+        reported.incrCounter("text classification", label, 1);
+    }
+    
+    private void filterOrCollect(Text key, BehemothDocument doc,
+            OutputCollector<Text, BehemothDocument> collector, Reporter reported) throws IOException{
         if (filter.keep(doc)) {
             collector.collect(key, doc);
         } else
             reported.incrCounter("text classification", "FILTERED", 1l);
-        reported.incrCounter("text classification", label, 1);
     }
 
     @Override
