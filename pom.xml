@@ -79,7 +79,7 @@
 		</dependency>
 
 		<!-- Text Classification's dependencies : needed if the library is added 
-			by hand from /lib -->
+			by hand from /lib 
 		<dependency>
 			<groupId>de.bwaldvogel</groupId>
 			<artifactId>liblinear</artifactId>
@@ -91,7 +91,7 @@
 			<artifactId>libsvm</artifactId>
 			<version>3.1</version>
 		</dependency>
-
+		-->
 	</dependencies>
 
 </project>
